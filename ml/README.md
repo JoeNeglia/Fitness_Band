@@ -1,4 +1,4 @@
-# FitBand ML heart rate pipeline
+# ML heart rate pipeline
 
 Makes heart rate more accurate while the wrist is moving. A simplified version of
 Vicente-Samper et al., *An ML-Based Approach to Reconstruct Heart Rate from PPG in Presence of
