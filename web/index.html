@@ -1,0 +1,331 @@
+<!doctype html>
+<!--
+  ============================================================================
+   FITBAND WEBPAGE
+  ============================================================================
+   Shows live heart rate and today's steps from the FitBand over Bluetooth.
+
+   How it works:
+     1. Tap "Connect" -> the phone lists nearby FitBands -> pick yours.
+     2. The page sends the phone's local time to the band (for the
+        midnight step reset).
+     3. The band pushes heart rate, status and steps once per second.
+
+   Requirements (Web Bluetooth):
+     - Android: Chrome.   iPhone: the free "Bluefy" browser app
+       (Safari does not support Web Bluetooth).
+     - The page must be opened over https:// (e.g. GitHub Pages) or
+       from localhost. Opening the file directly won't work on a phone.
+
+   The UUIDs below must match SECTION 10 of fitness_band.ino.
+  ============================================================================
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0f1115">
+<title>FitBand</title>
+<style>
+  /* ======================= COLORS (light + dark) ======================= */
+  :root {
+    --bg: #f5f6f8;
+    --card: #ffffff;
+    --text: #15171c;
+    --muted: #6b7280;
+    --border: #e4e6eb;
+    --heart: #e5484d;
+    --steps: #2f80ed;
+    --ok: #30a46c;
+    --warn: #d98a00;
+    --idle: #9aa0a6;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0f1115;
+      --card: #181b21;
+      --text: #f1f3f5;
+      --muted: #9aa0a6;
+      --border: #2a2e36;
+      --heart: #ff6369;
+      --steps: #5b9cf5;
+      --ok: #3dd68c;
+      --warn: #f1a10d;
+      --idle: #6b7280;
+    }
+  }
+
+  /* ============================= LAYOUT ================================ */
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  main {
+    max-width: 480px;
+    margin: 0 auto;
+    padding: max(20px, env(safe-area-inset-top)) 16px 32px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+  header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  h1 { font-size: 22px; margin: 0; letter-spacing: -0.01em; }
+
+  .conn {
+    display: flex; align-items: center; gap: 8px;
+    font-size: 14px; color: var(--muted);
+  }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--idle); }
+  .conn.on .dot { background: var(--ok); }
+
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    padding: 20px;
+  }
+  .label {
+    display: flex; align-items: center; gap: 8px;
+    font-size: 14px; font-weight: 600; color: var(--muted);
+    text-transform: uppercase; letter-spacing: 0.05em;
+  }
+  .value {
+    font-size: 72px; font-weight: 700; line-height: 1;
+    margin: 14px 0 6px;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.03em;
+  }
+  .unit { font-size: 20px; font-weight: 600; color: var(--muted); margin-left: 6px; letter-spacing: 0; }
+  .sub { font-size: 15px; color: var(--muted); min-height: 1.3em; }
+
+  /* ---- Heart card ---- */
+  .heart-icon { color: var(--heart); }
+  .beating .heart-icon { animation: beat var(--beat, 1s) ease-in-out infinite; }
+  @keyframes beat {
+    0%, 100% { transform: scale(1); }
+    15%      { transform: scale(1.25); }
+    30%      { transform: scale(1); }
+  }
+  .status {
+    display: inline-block; margin-top: 4px;
+    padding: 4px 10px; border-radius: 999px;
+    font-size: 13px; font-weight: 600;
+    background: color-mix(in srgb, var(--idle) 18%, transparent);
+    color: var(--muted);
+  }
+  .status.ok     { background: color-mix(in srgb, var(--ok) 18%, transparent);   color: var(--ok); }
+  .status.motion { background: color-mix(in srgb, var(--warn) 18%, transparent); color: var(--warn); }
+
+  /* ---- Steps card ---- */
+  .steps-icon { color: var(--steps); }
+  .bar { height: 10px; border-radius: 999px; background: var(--border); overflow: hidden; margin-top: 14px; }
+  .bar > div { height: 100%; width: 0; background: var(--steps); border-radius: 999px; transition: width 0.6s ease; }
+
+  /* ---- Button + messages ---- */
+  button {
+    font: inherit; font-size: 17px; font-weight: 600;
+    padding: 16px; border-radius: 14px; border: none;
+    background: var(--text); color: var(--bg);
+    cursor: pointer;
+  }
+  button:disabled { opacity: 0.5; }
+  .msg { font-size: 14px; color: var(--muted); text-align: center; line-height: 1.5; }
+  .msg.error { color: var(--heart); }
+  .hidden { display: none; }
+</style>
+</head>
+<body>
+<main>
+
+  <!-- ===================== HEADER + CONNECTION STATE ===================== -->
+  <header>
+    <h1>FitBand</h1>
+    <div class="conn" id="conn"><span class="dot"></span><span id="connText">Not connected</span></div>
+  </header>
+
+  <!-- =========================== HEART RATE ============================= -->
+  <section class="card" id="heartCard">
+    <div class="label">
+      <svg class="heart-icon" width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+        <path d="M12 21s-7.5-4.6-10-9.2C.3 8.6 2.2 4.5 6 4.5c2.2 0 3.6 1.2 4.5 2.4h3c.9-1.2 2.3-2.4 4.5-2.4 3.8 0 5.7 4.1 4 7.3C19.5 16.4 12 21 12 21z"/>
+      </svg>
+      Heart rate
+    </div>
+    <div class="value"><span id="bpm">--</span><span class="unit">BPM</span></div>
+    <span class="status" id="status">Waiting for band</span>
+  </section>
+
+  <!-- ============================== STEPS =============================== -->
+  <section class="card">
+    <div class="label">
+      <svg class="steps-icon" width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+        <ellipse cx="8" cy="7.5" rx="3" ry="4.5"/><ellipse cx="8.5" cy="16" rx="2.2" ry="2"/>
+        <ellipse cx="16" cy="10.5" rx="3" ry="4.5"/><ellipse cx="15.5" cy="19" rx="2.2" ry="2"/>
+      </svg>
+      Steps today
+    </div>
+    <div class="value"><span id="steps">--</span></div>
+    <div class="sub" id="goalText">Goal: 10,000</div>
+    <div class="bar"><div id="goalBar"></div></div>
+  </section>
+
+  <!-- ========================= CONNECT BUTTON =========================== -->
+  <button id="connectBtn">Connect to FitBand</button>
+  <p class="msg" id="msg"></p>
+
+</main>
+
+<script>
+// ============================================================================
+//  SECTION 1: SETTINGS (must match fitness_band.ino SECTION 10)
+// ============================================================================
+const SERVICE_UUID   = '6e7a1000-4b2c-4f8a-9c3d-2a1b0c9d8e7f';
+const LIVE_DATA_UUID = '6e7a1001-4b2c-4f8a-9c3d-2a1b0c9d8e7f';
+const TIME_SYNC_UUID = '6e7a1002-4b2c-4f8a-9c3d-2a1b0c9d8e7f';
+const STEP_GOAL      = 10000;
+
+// Status codes sent by the band (byte 1 of the live data).
+const STATUS = {
+  0: { text: 'Place sensor on skin', cls: '' },
+  1: { text: 'Finding pulse…',       cls: '' },
+  2: { text: 'Good signal',          cls: 'ok' },
+  3: { text: 'Hold still – motion',  cls: 'motion' },
+};
+
+// ============================================================================
+//  SECTION 2: PAGE ELEMENTS
+// ============================================================================
+const el = id => document.getElementById(id);
+const ui = {
+  bpm: el('bpm'), status: el('status'), heartCard: el('heartCard'),
+  steps: el('steps'), goalText: el('goalText'), goalBar: el('goalBar'),
+  conn: el('conn'), connText: el('connText'),
+  btn: el('connectBtn'), msg: el('msg'),
+};
+
+function showMessage(text, isError = false) {
+  ui.msg.textContent = text;
+  ui.msg.classList.toggle('error', isError);
+}
+
+function setConnected(on, name = '') {
+  ui.conn.classList.toggle('on', on);
+  ui.connText.textContent = on ? `Connected${name ? ' · ' + name : ''}` : 'Not connected';
+  ui.btn.classList.toggle('hidden', on);
+}
+
+// ============================================================================
+//  SECTION 3: SHOWING DATA FROM THE BAND
+//  Live data packet (6 bytes):
+//    byte 0     BPM (0 = none)
+//    byte 1     status code
+//    bytes 2-5  steps today (little-endian 32-bit)
+// ============================================================================
+function showLiveData(dataView) {
+  const bpm    = dataView.getUint8(0);
+  const status = dataView.getUint8(1);
+  const steps  = dataView.getUint32(2, true);
+
+  // ---- Heart rate ----
+  ui.bpm.textContent = bpm > 0 ? bpm : '--';
+  const s = STATUS[status] || STATUS[1];
+  ui.status.textContent = s.text;
+  ui.status.className = 'status ' + s.cls;
+
+  // Animate the heart at the actual heart rate.
+  if (bpm > 0) {
+    ui.heartCard.classList.add('beating');
+    ui.heartCard.style.setProperty('--beat', (60 / bpm) + 's');
+  } else {
+    ui.heartCard.classList.remove('beating');
+  }
+
+  // ---- Steps ----
+  ui.steps.textContent = steps.toLocaleString();
+  const pct = Math.min(100, (steps / STEP_GOAL) * 100);
+  ui.goalBar.style.width = pct + '%';
+  ui.goalText.textContent = steps >= STEP_GOAL
+    ? `Goal reached! (${STEP_GOAL.toLocaleString()})`
+    : `${Math.round(pct)}% of ${STEP_GOAL.toLocaleString()} goal`;
+}
+
+// ============================================================================
+//  SECTION 4: BLUETOOTH CONNECTION
+// ============================================================================
+let device = null;
+
+// Sends the phone's local time so the band knows when midnight is.
+async function syncTime(service) {
+  const timeChar = await service.getCharacteristic(TIME_SYNC_UUID);
+  const localSeconds = Math.floor(Date.now() / 1000) - new Date().getTimezoneOffset() * 60;
+  const buf = new DataView(new ArrayBuffer(4));
+  buf.setUint32(0, localSeconds, true);   // little-endian, like the band expects
+  await timeChar.writeValue(buf);
+}
+
+// Connects to the band's GATT server, syncs time and subscribes to updates.
+async function startSession() {
+  showMessage('Connecting…');
+  const server  = await device.gatt.connect();
+  const service = await server.getPrimaryService(SERVICE_UUID);
+
+  await syncTime(service);
+
+  const liveChar = await service.getCharacteristic(LIVE_DATA_UUID);
+  liveChar.addEventListener('characteristicvaluechanged', e => showLiveData(e.target.value));
+  await liveChar.startNotifications();
+  showLiveData(await liveChar.readValue());   // Show values immediately
+
+  setConnected(true, device.name);
+  showMessage('');
+}
+
+// "Connect" button: pick the band from the phone's device list.
+async function connect() {
+  if (!navigator.bluetooth) {
+    showMessage('This browser can\'t use Bluetooth. Use Chrome on Android, or the Bluefy app on iPhone.', true);
+    return;
+  }
+  ui.btn.disabled = true;
+  try {
+    device = await navigator.bluetooth.requestDevice({ filters: [{ services: [SERVICE_UUID] }] });
+    device.addEventListener('gattserverdisconnected', onDisconnected);
+    await startSession();
+  } catch (err) {
+    if (err.name !== 'NotFoundError') showMessage('Could not connect: ' + err.message, true);
+    else showMessage('');   // User closed the device picker
+  } finally {
+    ui.btn.disabled = false;
+  }
+}
+
+// Band went out of range or turned off: try to reconnect a few times.
+async function onDisconnected() {
+  setConnected(false);
+  for (let attempt = 1; attempt <= 5; attempt++) {
+    showMessage(`Connection lost. Reconnecting (${attempt}/5)…`);
+    await new Promise(r => setTimeout(r, attempt * 2000));
+    try {
+      await startSession();
+      return;
+    } catch (_) { /* try again */ }
+  }
+  showMessage('Band not found. Make sure it is on and nearby, then tap Connect.', true);
+}
+
+ui.btn.addEventListener('click', connect);
+if (!navigator.bluetooth) {
+  showMessage('This browser can\'t use Bluetooth. Use Chrome on Android, or the Bluefy app on iPhone.', true);
+}
+</script>
+</body>
+</html>

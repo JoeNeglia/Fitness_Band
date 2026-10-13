@@ -1,0 +1,7 @@
+# ML pipeline: virtual env, recordings and generated outputs
+ml/.venv/
+ml/data/
+ml/models/
+ml/reports/
+__pycache__/
+.DS_Store
