@@ -1,6 +1,6 @@
 /*
  * ============================================================================
- *  FITNESS BAND  —  Heart Rate + Step Counter over Bluetooth
+ *  FIT BAND BLE  —  streams sensor data to collect.py over Bluetooth
  * ============================================================================
  *
  *  Board:    Seeed XIAO nRF52840
@@ -16,22 +16,26 @@
  *            Sensor GND -> XIAO GND
  *
  *  What this sketch does:
- *    1. Reads the PPG sensor 100 times per second and finds heart beats.
- *    2. Reads the IMU 100 times per second to:
- *         - count steps
- *         - measure how much the wrist is moving, so heart beats measured
- *           during heavy motion (which are usually fake) get thrown out.
- *    3. Resets the step count at midnight (the phone sends the time when
- *       it connects).
- *    4. Sends heart rate, steps and status over Bluetooth Low Energy once
- *       per second. The webpage in /web/index.html connects to it and
- *       shows the numbers on your phone.
+ *    1. Reads the PPG sensor 100 times per second and runs a simple
+ *       on-board beat detector (the "bpm" column).
+ *    2. Reads the IMU 100 times per second to measure motion and count steps.
+ *    3. About 10 times per second, sends one CSV text line over Bluetooth
+ *       using the Nordic UART Service (NUS). collect.py receives it.
+ *       The same line is also printed to the USB Serial Monitor.
  *
- *  Why Bluetooth and not WiFi: the nRF52840 chip has no WiFi radio.
+ *  CSV line format (13 columns, no header):
+ *      ms,ppg,pulse,ax_mg,ay_mg,az_mg,gx_dps,gy_dps,gz_dps,motion,bpm,status,steps
+ *    ms       board time in milliseconds since power-on
+ *    ppg      raw PPG light level, averaged over the samples since the last line
+ *    pulse    on-board filtered pulse wave (flipped so beats are peaks)
+ *    ax..az   acceleration in milli-g
+ *    gx..gz   rotation speed in degrees/second
+ *    motion   on-board motion level: 0 still, 1 moderate, 2 heavy
+ *    bpm      on-board heart rate estimate (0 = no reading)
+ *    status   0 no skin, 1 searching, 2 ok, 3 too much motion
+ *    steps    steps counted since power-on
  *
- *  Tuning tip: set DEBUG_SERIAL to 1 and open Tools > Serial Plotter to see
- *  the PPG signal, motion level and BPM live while you adjust the settings
- *  in SECTION 1.
+ *  To stream faster later, lower STREAM_PERIOD_MS (10 ms = 100 lines/s).
  * ============================================================================
  */
 
@@ -43,8 +47,6 @@
 // ============================================================================
 //  SECTION 1: SETTINGS YOU CAN TUNE
 // ============================================================================
-
-#define DEBUG_SERIAL 0          // 1 = print values for the Serial Plotter, 0 = quiet
 
 // ---- I2C addresses ----
 const uint8_t PPG_ADDR = 0x57;  // MAX30102
@@ -75,9 +77,10 @@ const uint16_t STEP_MIN_INTERVAL_MS = 250;   // Steps closer than this are ignor
 const uint16_t STEP_MAX_INTERVAL_MS = 2000;  // Gaps longer than this end a walking streak
 const uint8_t  STEPS_TO_START_WALK  = 4;     // Need this many regular steps in a row before counting
 
-// ---- Bluetooth ----
-const char*    DEVICE_NAME    = "FitBand";
-const uint16_t BLE_UPDATE_MS  = 1000;        // How often to send data to the phone
+// ---- Bluetooth streaming ----
+const char*    DEVICE_NAME      = "FitBand";   // collect.py looks for this name
+const uint16_t STREAM_PERIOD_MS = 100;         // 100 ms = 10 lines per second
+const bool     ECHO_TO_SERIAL   = true;        // also print each line to the USB Serial Monitor
 
 
 // ============================================================================
@@ -85,7 +88,7 @@ const uint16_t BLE_UPDATE_MS  = 1000;        // How often to send data to the ph
 //  Values that several sections read or write.
 // ============================================================================
 
-// Heart rate status codes, sent to the phone along with the BPM.
+// Heart rate status codes (the "status" column).
 enum HrStatus : uint8_t {
   HR_NO_SKIN   = 0,   // Sensor isn't touching skin
   HR_SEARCHING = 1,   // Skin detected, still collecting beats
@@ -111,7 +114,8 @@ uint8_t     currentBpm      = 0;            // 0 = no reading
 HrStatus    hrStatus        = HR_NO_SKIN;
 MotionLevel motionLevel     = MOTION_STILL;
 uint32_t    lastHeavyMotionMs = 0;          // When heavy motion was last seen
-uint32_t    stepsToday      = 0;
+uint32_t    stepsToday      = 0;            // steps since power-on
+ImuReading  latestImu       = {0, 0, 0, 0, 0, 0};   // newest IMU reading, for streaming
 
 
 // ============================================================================
@@ -291,12 +295,6 @@ void updateSteps(uint32_t nowMs) {
   }
 }
 
-void resetSteps() {
-  stepsToday   = 0;
-  pendingSteps = 0;
-  walking      = false;
-}
-
 
 // ============================================================================
 //  SECTION 7: PPG (MAX30102) SETUP AND READING
@@ -468,8 +466,16 @@ void handlePeak(uint32_t beatMs) {
   if (++rejectsInRow >= 5) clearBeatHistory();
 }
 
+// Raw PPG samples since the last CSV line, averaged when the line is sent.
+// Averaging (instead of sending just the newest sample) smooths out noise
+// that would otherwise alias when streaming slower than the sensor runs.
+uint32_t ppgSum   = 0;
+uint16_t ppgCount = 0;
+
 void processPpgSample(uint32_t raw) {
   ppgClockMs += PPG_SAMPLE_PERIOD_MS;
+  ppgSum += raw;
+  ppgCount++;
 
   // ---- Step 1: Skin check ----
   if (raw < SKIN_THRESHOLD) {
@@ -527,139 +533,81 @@ void processPpgSample(uint32_t raw) {
 
 
 // ============================================================================
-//  SECTION 9: DAILY STEP RESET (CLOCK)
+//  SECTION 9: BLUETOOTH (Nordic UART Service)
 //
-//  The board has no real clock. When the phone connects, the webpage sends
-//  the local time (seconds since 1970, adjusted to your time zone). The
-//  board adds the time passed since then to know the date, and resets the
-//  step count when the date changes at midnight.
-//
-//  Until the phone has connected once, steps count from power-on.
+//  NUS is a standard "serial port over Bluetooth". The band sends text on
+//  its TX characteristic and collect.py subscribes to it. Lines longer than
+//  one Bluetooth packet are split automatically and collect.py joins them
+//  back together at each newline.
 // ============================================================================
 
-volatile bool     timeSyncReceived = false;  // Set by the Bluetooth callback
-volatile uint32_t receivedLocalSeconds = 0;
-
-bool     clockSet          = false;
-uint32_t clockLocalSeconds = 0;      // Local time when the clock was last set
-uint32_t clockSetAtMs      = 0;      // millis() when the clock was last set
-int32_t  currentDay        = -1;     // Days since 1970, or -1 if unknown
-
-void setClock(uint32_t localSeconds) {
-  clockLocalSeconds = localSeconds;
-  clockSetAtMs      = millis();
-  clockSet          = true;
-}
-
-void checkForNewDay() {
-  if (!clockSet) return;
-
-  uint32_t nowLocalSeconds = clockLocalSeconds + (millis() - clockSetAtMs) / 1000;
-  int32_t  today = nowLocalSeconds / 86400;   // 86400 seconds per day
-
-  if (currentDay >= 0 && today != currentDay) {
-    resetSteps();
-  }
-  currentDay = today;
-}
-
-
-// ============================================================================
-//  SECTION 10: BLUETOOTH
-//
-//  The band advertises as "FitBand" with one custom service holding two
-//  characteristics (data slots):
-//
-//   LIVE DATA (phone reads / gets notified), 6 bytes:
-//     byte 0     heart rate in BPM (0 = no reading)
-//     byte 1     status: 0 no skin, 1 searching, 2 ok, 3 motion
-//     bytes 2-5  steps today (32-bit number, low byte first)
-//
-//   TIME SYNC (phone writes), 4 bytes:
-//     local time in seconds since 1970 (32-bit, low byte first)
-//
-//  The UUIDs must match the ones in web/index.html:
-//     service    6e7a1000-4b2c-4f8a-9c3d-2a1b0c9d8e7f
-//     live data  6e7a1001-4b2c-4f8a-9c3d-2a1b0c9d8e7f
-//     time sync  6e7a1002-4b2c-4f8a-9c3d-2a1b0c9d8e7f
-//  (Bluefruit wants UUID bytes in reverse order, which is why the arrays
-//   below look backwards.)
-// ============================================================================
-
-const uint8_t UUID_SERVICE[16] = {0x7F, 0x8E, 0x9D, 0x0C, 0x1B, 0x2A, 0x3D, 0x9C,
-                                  0x8A, 0x4F, 0x2C, 0x4B, 0x00, 0x10, 0x7A, 0x6E};
-const uint8_t UUID_LIVE[16]    = {0x7F, 0x8E, 0x9D, 0x0C, 0x1B, 0x2A, 0x3D, 0x9C,
-                                  0x8A, 0x4F, 0x2C, 0x4B, 0x01, 0x10, 0x7A, 0x6E};
-const uint8_t UUID_TIME[16]    = {0x7F, 0x8E, 0x9D, 0x0C, 0x1B, 0x2A, 0x3D, 0x9C,
-                                  0x8A, 0x4F, 0x2C, 0x4B, 0x02, 0x10, 0x7A, 0x6E};
-
-BLEService        fitService(UUID_SERVICE);
-BLECharacteristic liveChar(UUID_LIVE);
-BLECharacteristic timeChar(UUID_TIME);
-
-// Runs when the phone writes the time. Only stores it; loop() applies it.
-void onTimeWritten(uint16_t connHandle, BLECharacteristic* chr, uint8_t* data, uint16_t len) {
-  if (len != 4) return;
-  receivedLocalSeconds = (uint32_t)data[0] |
-                         ((uint32_t)data[1] << 8) |
-                         ((uint32_t)data[2] << 16) |
-                         ((uint32_t)data[3] << 24);
-  timeSyncReceived = true;
-}
+BLEUart bleuart;
 
 void onConnect(uint16_t connHandle) {
-  Serial.println("Phone connected");
+  // Ask for bigger packets so each CSV line fits in one or two of them.
+  Bluefruit.Connection(connHandle)->requestMtuExchange(247);
+  Serial.println("# collect.py connected");
 }
 
 void onDisconnect(uint16_t connHandle, uint8_t reason) {
-  Serial.println("Phone disconnected");
+  Serial.println("# collect.py disconnected");
 }
 
 void setupBluetooth() {
+  Bluefruit.configPrphBandwidth(BANDWIDTH_MAX);   // allow large packets (must come before begin)
   Bluefruit.begin();
   Bluefruit.setTxPower(4);
   Bluefruit.setName(DEVICE_NAME);
   Bluefruit.Periph.setConnectCallback(onConnect);
   Bluefruit.Periph.setDisconnectCallback(onDisconnect);
 
-  // ---- Service and characteristics ----
-  fitService.begin();
+  bleuart.begin();
 
-  liveChar.setProperties(CHR_PROPS_READ | CHR_PROPS_NOTIFY);
-  liveChar.setPermission(SECMODE_OPEN, SECMODE_NO_ACCESS);
-  liveChar.setFixedLen(6);
-  liveChar.begin();
-
-  timeChar.setProperties(CHR_PROPS_WRITE | CHR_PROPS_WRITE_WO_RESP);
-  timeChar.setPermission(SECMODE_NO_ACCESS, SECMODE_OPEN);
-  timeChar.setFixedLen(4);
-  timeChar.setWriteCallback(onTimeWritten);
-  timeChar.begin();
-
-  // ---- Advertising (how the phone finds the band) ----
+  // ---- Advertising (how the computer finds the band) ----
   Bluefruit.Advertising.addFlags(BLE_GAP_ADV_FLAGS_LE_ONLY_GENERAL_DISC_MODE);
   Bluefruit.Advertising.addTxPower();
-  Bluefruit.Advertising.addService(fitService);
+  Bluefruit.Advertising.addService(bleuart);
   Bluefruit.ScanResponse.addName();
-  Bluefruit.Advertising.restartOnDisconnect(true);   // Advertise again after the phone leaves
-  Bluefruit.Advertising.setInterval(32, 244);        // Fast at first, then slower to save power
-  Bluefruit.Advertising.setFastTimeout(30);          // Seconds of fast advertising
+  Bluefruit.Advertising.restartOnDisconnect(true);   // advertise again after a disconnect
+  Bluefruit.Advertising.setInterval(32, 244);
+  Bluefruit.Advertising.setFastTimeout(30);
   Bluefruit.Advertising.start(0);                    // 0 = advertise forever
 }
 
-// Packs the current values and sends them to the phone.
-void sendLiveData() {
-  uint8_t packet[6];
-  packet[0] = currentBpm;
-  packet[1] = hrStatus;
-  packet[2] = stepsToday & 0xFF;
-  packet[3] = (stepsToday >> 8) & 0xFF;
-  packet[4] = (stepsToday >> 16) & 0xFF;
-  packet[5] = (stepsToday >> 24) & 0xFF;
 
-  liveChar.write(packet, sizeof(packet));            // Value the phone gets when it reads
-  if (Bluefruit.connected() && liveChar.notifyEnabled()) {
-    liveChar.notify(packet, sizeof(packet));         // Push to the phone right away
+// ============================================================================
+//  SECTION 10: BUILD AND SEND ONE CSV LINE
+// ============================================================================
+
+void sendCsvLine(uint32_t nowMs) {
+  // Average the raw PPG samples collected since the last line.
+  uint32_t ppgAvg = (ppgCount > 0) ? ppgSum / ppgCount : 0;
+  ppgSum = 0;
+  ppgCount = 0;
+
+  // Build the line as text: ms,ppg,pulse,ax_mg,ay_mg,az_mg,gx_dps,gy_dps,gz_dps,motion,bpm,status,steps
+  String line;
+  line.reserve(120);
+  line += nowMs;                             line += ',';
+  line += ppgAvg;                            line += ',';
+  line += String(ppgPulse, 1);               line += ',';
+  line += String(latestImu.ax * 1000, 1);    line += ',';
+  line += String(latestImu.ay * 1000, 1);    line += ',';
+  line += String(latestImu.az * 1000, 1);    line += ',';
+  line += String(latestImu.gx, 2);           line += ',';
+  line += String(latestImu.gy, 2);           line += ',';
+  line += String(latestImu.gz, 2);           line += ',';
+  line += (int)motionLevel;                  line += ',';
+  line += currentBpm;                        line += ',';
+  line += (int)hrStatus;                     line += ',';
+  line += stepsToday;
+  line += '\n';
+
+  if (Bluefruit.connected() && bleuart.notifyEnabled()) {
+    bleuart.print(line);
+  }
+  if (ECHO_TO_SERIAL) {
+    Serial.print(line);
   }
 }
 
@@ -669,29 +617,28 @@ void sendLiveData() {
 // ============================================================================
 
 void setup() {
-  Serial.begin(115200);       // No waiting for Serial: the band must run on battery too
+  Serial.begin(115200);       // no waiting for Serial: the band must run on battery too
   Wire.begin();
-  Wire.setClock(400000);      // Fast I2C (400 kHz) so sensor reads stay quick
+  Wire.setClock(400000);      // fast I2C (400 kHz) so sensor reads stay quick
 
   setupImu();
   setupPpg();
   setupBluetooth();
 
-  Serial.println("FitBand ready. Open the webpage on your phone and tap Connect.");
+  Serial.println("# FitBand ready, waiting for collect.py");
 }
 
 
 // ============================================================================
 //  SECTION 12: MAIN LOOP  (runs over and over)
 //
-//  Every 10 ms : read the IMU -> update motion level and step counter
-//  Every loop  : read all new PPG samples -> heart rate detection
-//  Every 1 s   : handle time sync, check for midnight, send data to phone
+//  Every 10 ms               : read the IMU -> motion level and step counter
+//  Every loop                : read all new PPG samples -> beat detection
+//  Every STREAM_PERIOD_MS    : send one CSV line
 // ============================================================================
 
-uint32_t lastImuMs   = 0;
-uint32_t lastBleMs   = 0;
-uint32_t lastDebugMs = 0;
+uint32_t lastImuMs    = 0;
+uint32_t lastStreamMs = 0;
 
 void loop() {
   uint32_t now = millis();
@@ -699,9 +646,8 @@ void loop() {
   // ---- IMU: motion + steps, 100 times per second ----
   if (now - lastImuMs >= 10) {
     lastImuMs = now;
-    ImuReading imu;
-    if (readImu(imu)) {
-      updateMotion(imu, now);
+    if (readImu(latestImu)) {
+      updateMotion(latestImu, now);
       updateSteps(now);
     }
   }
@@ -713,27 +659,9 @@ void loop() {
   }
   readPpgFifo();
 
-  // ---- Once per second: clock + Bluetooth ----
-  if (now - lastBleMs >= BLE_UPDATE_MS) {
-    lastBleMs = now;
-
-    if (timeSyncReceived) {
-      timeSyncReceived = false;
-      setClock(receivedLocalSeconds);
-    }
-    checkForNewDay();
-    sendLiveData();
+  // ---- Stream one CSV line ----
+  if (now - lastStreamMs >= STREAM_PERIOD_MS) {
+    lastStreamMs = now;
+    sendCsvLine(now);
   }
-
-  // ---- Debug output for the Serial Plotter (20 times per second) ----
-#if DEBUG_SERIAL
-  if (now - lastDebugMs >= 50) {
-    lastDebugMs = now;
-    Serial.print("ppgDC:");       Serial.print(ppgDC);
-    Serial.print(",pulse:");      Serial.print(ppgPulse);
-    Serial.print(",motionG:");    Serial.print(motionAccelAvg * 1000);   // x1000 so it shows on the plot
-    Serial.print(",bpm:");        Serial.print(currentBpm);
-    Serial.print(",steps:");      Serial.println(stepsToday);
-  }
-#endif
 }

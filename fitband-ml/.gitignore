@@ -1,0 +1,22 @@
+# Recorded data stays on your computer (folders are kept via .gitkeep)
+data/raw/*
+data/processed/*
+!data/raw/.gitkeep
+!data/processed/.gitkeep
+
+# Python
+__pycache__/
+*.pyc
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# macOS
+.DS_Store
+
+# LaTeX build files
+docs/*.aux
+docs/*.log
+docs/*.out

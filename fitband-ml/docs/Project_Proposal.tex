@@ -1,0 +1,80 @@
+\documentclass[conference]{IEEEtran}
+\usepackage{graphicx}
+\usepackage{url}
+
+\begin{document}
+
+\title{Fitness Band ML Proposal}
+
+\author{\IEEEauthorblockN{Joe Neglia}
+\IEEEauthorblockA{University of Colorado Boulder\\
+Boulder, CO, USA\\
+jone2220@colorado.edu}}
+
+\maketitle
+
+
+\section{Introduction}
+A photoplethysmography (PPG) sensor is found in nearly every commercial fitness wearable and is used to measure a person's heart rate. A PPG sensor has two main components: an LED shines light into the user's skin, and a photodetector measures how the reflected light fluctuates with blood flow. However, PPG readings are easily corrupted by motion artifacts when the user moves their arm, wrist, or fingers. This project uses the inertial measurement unit (IMU) on a custom-built wrist wearable, together with machine learning, to estimate heart rate accurately during movement.
+
+\section{Related Work}
+Vicente-Samper \textit{et al.}~\cite{vicente2023} proposed a two-stage machine learning pipeline for reconstructing heart rate from wrist PPG in the presence of motion artifacts. A classifier first identifies the user's activity (resting, finger movement, or walking). Resting windows are processed with the FFT of the filtered PPG signal, while movement windows are routed to dedicated regression models. Using a chest-worn ECG as ground truth, their approach reduced the average RMSE from 18.47 to 12.23 BPM during validation. Notably, their regression models relied entirely on body temperature features. The wearable in this project has no temperature sensor, so heart rate must instead be estimated from PPG and motion features.
+
+\section{Data Collection}
+I will be the subject of the data collection, because the model only needs to work for one person. Two devices will be worn at the same time:
+\begin{itemize}
+    \item A custom wristband (Seeed XIAO nRF52840) on the dominant wrist, recording PPG from a MAX30102 sensor and accelerometer and gyroscope data from an LSM6DS3 IMU. It streams its readings over Bluetooth Low Energy at about 10 samples per second, to be raised to 100 later.
+    \item A Garmin HRM 200 chest strap, which detects the heart's electrical activity and reports heart rate about once per second, along with beat-to-beat (RR) intervals. Its readings will serve as the ground truth.
+\end{itemize}
+
+Each session follows a routine of four activities, with 2-minute rests in between:
+\begin{itemize}
+    \item \textbf{Resting:} sitting still with the hand fixed (5 min)
+    \item \textbf{Typing:} typing on a keyboard (5 min)
+    \item \textbf{Walking:} normal pace (5 min)
+    \item \textbf{Running:} steady pace (5 min)
+\end{itemize}
+
+The routine will be repeated across at least 3 sessions on different days to collect at least an hour of data. Both devices connect over Bluetooth to a single laptop, which stamps every incoming sample with its own clock, so the two data streams are aligned using these shared timestamps. Each activity block will be split into non-overlapping 6-second windows. Because Bluetooth delivers samples unevenly, the wristband's own clock will be used to resample each window to a uniform rate. For each window, the mean, standard deviation, skewness, kurtosis, and FFT energy in the 0.5--3~Hz band will be computed for the PPG, the three accelerometer axes, the accelerometer magnitude, and the three gyroscope axes. Each window will be labeled with its activity and the average chest-strap heart rate. As a check on the strap's own smoothing, a second label will be computed from its RR intervals. Windows with too few strap readings or wristband samples will be discarded.
+
+\section{Method}
+The approach follows the two-stage structure of~\cite{vicente2023}:
+\begin{enumerate}
+    \item \textbf{Activity classification:} A classifier labels each window as resting, typing, walking, or running.
+    \item \textbf{Heart rate estimation:} Resting windows use the FFT of the band-pass filtered PPG signal. Typing, walking, and running windows are passed to a regression model trained on PPG and motion features.
+\end{enumerate}
+Bagged trees, random forest, k-nearest neighbors, support vector machine, and gradient boosting classifiers will be investigated for activity classification. Bagged trees, random forest, Gaussian process regression, gradient boosting, and ridge regression will be investigated for heart rate estimation. Feature selection will be applied before training.
+
+\section{Evaluation Plan}
+
+\subsection{Baseline}
+For heart rate estimation, the baseline is the FFT of the filtered PPG signal applied to every window, regardless of activity. This represents the standard approach with no motion correction. The wristband's own on-board beat detector, which rejects beats during heavy motion, will also be reported for comparison. For activity classification, the baseline is always predicting the most common activity.
+
+\subsection{Metric}
+Heart rate estimation will be evaluated with root mean square error (RMSE) in BPM against the chest-strap ground truth, allowing direct comparison with~\cite{vicente2023}. Activity classification will be evaluated with macro-F1 score because it weights each activity equally, so poor performance on a less common activity can't hide behind the larger share of resting windows.
+
+\subsection{Split}
+Data will be split by session rather than by random window. Earlier sessions will be used for training and later, held-out sessions for testing. Because neighboring 6-second windows are nearly identical, a random split would leak test data into training and inflate results.
+
+\subsection{Slices}
+Heart rate error will be examined separately for:
+\begin{itemize}
+    \item Each activity: resting, typing, walking, and running
+    \item Heart rate range: below 100 BPM vs.\ 100 BPM and above
+\end{itemize}
+
+\section{Future Work}
+If all goes well a human-in-the-loop interface on the phone could be implemented. A webpage would display the model's predicted activity in real time, and the user could tap a button to confirm or correct it. Corrected windows would be added to the training set, and the classifier would be periodically retrained, allowing it to adapt to the user's movement patterns over time. To limit how often the user is interrupted, an active learning approach could request feedback only when the classifier's confidence is low.
+
+\section*{Acknowledgment}
+Claude~\cite{claude2026}, an AI assistant developed by Anthropic, was used to help draft and edit this proposal.
+
+\begin{thebibliography}{00}
+\bibitem{vicente2023}
+J.~M. Vicente-Samper, C.~Tamantini, E.~\'{A}vila-Navarro, M.~\'{A}. De La Casa-Lillo, L.~Zollo, J.~M. Sabater-Navarro, and F.~Cordella, ``An ML-based approach to reconstruct heart rate from PPG in presence of motion artifacts,'' \textit{Biosensors}, vol.~13, no.~7, Art.~no.~718, Jul. 2023, doi: 10.3390/bios13070718.
+
+\bibitem{claude2026}
+Anthropic, ``Claude Opus 5.5,'' 2026. [Online]. Available: \url{https://claude.ai}
+\end{thebibliography}
+
+\end{document}
