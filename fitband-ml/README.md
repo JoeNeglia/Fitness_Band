@@ -54,7 +54,7 @@ Wear the band and the strap (wet the strap's electrodes), then:
 python collect/collect.py test 60
 ```
 
-Every 5 s it prints the row counts. Expect ~10 band rows per second and ~1 strap row per
+Every 5 s it prints the row counts. Expect ~10 band rows per second and ~2 strap rows per
 second. Two files appear in `data/raw/`. Delete them when you're done.
 
 ## Full session protocol
@@ -97,13 +97,13 @@ python analysis/label.py
 | `status` | 0 no skin contact, 1 searching, 2 ok, 3 too much motion |
 | `steps` | Steps since the band was powered on |
 
-**`hrm_<activity>_<YYYYMMDD_HHMMSS>.csv`**, about 1 row per second:
+**`hrm_<activity>_<YYYYMMDD_HHMMSS>.csv`**, about 2 rows per second:
 
 | Column | Meaning |
 |---|---|
 | `pc_time` | Computer clock when the packet arrived (seconds since 1970) |
 | `hr` | Strap heart rate (BPM) |
-| `rr_ms` | Beat-to-beat intervals in ms, oldest first, separated by `;`. Can be empty |
+| `rr_ms` | Beat-to-beat intervals in ms, oldest first, separated by `;`. Can be empty. The HRM 200 often repeats the previous packet's values; `label.py` skips repeats |
 
 **`data/processed/windows.csv`**, one row per 6-second window: `session`, `activity`, `window`,
 40 features (`<signal>_<mean|std|skew|kurt|energy>` for ppg, ax, ay, az, gx, gy, gz, acc_mag),

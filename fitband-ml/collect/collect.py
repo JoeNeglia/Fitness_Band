@@ -8,7 +8,7 @@ collect.py — record one activity block from the band and the chest strap.
 Connects over Bluetooth to:
   - the FitBand (Nordic UART Service): one CSV line about 10 times per second
   - the Garmin HRM 200 chest strap (standard Heart Rate Service): heart rate
-    about once per second, plus beat-to-beat (RR) intervals when available
+    about twice per second, plus beat-to-beat (RR) intervals when available
 
 Every row is stamped with this computer's clock (pc_time, seconds since
 1970). Both devices are stamped by the same clock, which is how the band
@@ -28,6 +28,7 @@ from datetime import datetime
 from pathlib import Path
 
 from bleak import BleakClient, BleakScanner
+from bleak.exc import BleakError
 
 # =============================================================================
 #  SETTINGS
@@ -152,6 +153,28 @@ async def find(name, match):
     return device
 
 
+async def subscribe_to_strap(strap_client, on_packet, attempts=4):
+    """
+    The HRM 200 only sends heart rate over a paired (encrypted) connection.
+    The first time, macOS fails with "Encryption is insufficient" while it
+    shows a pairing request. After you accept it, trying again works.
+    """
+    for attempt in range(1, attempts + 1):
+        try:
+            if not strap_client.is_connected:      # a failed pairing makes the strap hang up
+                await strap_client.connect()
+            await strap_client.start_notify(HR_MEASUREMENT, on_packet)
+            return
+        except BleakError as error:
+            if attempt == attempts:
+                sys.exit("\nThe strap refused to pair with this Mac. See 'Strap won't pair' in "
+                         "docs/Data_Collection_Guide.pdf.")
+            print(f"  Strap not paired yet ({error}).")
+            print("  If a Bluetooth pairing request pops up on your Mac, click Connect/Pair."
+                  f" Retrying in 5 s ({attempt}/{attempts - 1})...")
+            await asyncio.sleep(5)
+
+
 async def record(activity, seconds):
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -163,8 +186,9 @@ async def record(activity, seconds):
         strap_device = await find("chest strap", is_strap)
 
         async with BleakClient(band_device) as band_client, BleakClient(strap_device) as strap_client:
+            # Strap first, so band rows only start once both devices are ready
+            await subscribe_to_strap(strap_client, hrm.on_packet)
             await band_client.start_notify(UART_TX, band.on_packet)
-            await strap_client.start_notify(HR_MEASUREMENT, hrm.on_packet)
             print(f"\nRecording '{activity}' for {seconds} s. Press Ctrl-C to stop early.\n")
 
             start = time.time()

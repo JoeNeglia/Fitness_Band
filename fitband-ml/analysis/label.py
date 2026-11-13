@@ -34,6 +34,7 @@ OUT_CSV = PROJECT_DIR / "data" / "processed" / "windows.csv"
 WINDOW_S = 6.0                  # window length in seconds (non-overlapping)
 MIN_STRAP_READINGS = 3          # drop windows with fewer strap readings than this
 MIN_BAND_FRACTION = 0.8         # drop windows with less than 80% of the expected band rows
+MAX_NO_SKIN_FRACTION = 0.1      # drop windows where the PPG was off the skin (status 0) for >10% of rows
 
 ENERGY_BAND_HZ = (0.5, 3.0)     # band used for the "energy" feature
 HR_BAND_HZ = (0.67, 3.5)        # heart rate search range: 40-210 BPM
@@ -103,12 +104,22 @@ def sampling_rate(band):
 #  before it arrived, oldest first. The last beat happened at about the
 #  packet's pc_time, so we walk backwards: each earlier beat happened one
 #  RR interval before the next one.
+#
+#  The HRM 200 sends a packet every 0.5 s, and often repeats the previous
+#  packet's RR values when no new beat happened in between. Those repeats
+#  are skipped so each beat is only counted once. (Two real beats with the
+#  exact same RR to the millisecond are rare, and dropping one barely
+#  changes the window's average.)
 # =============================================================================
 def rr_beats(hrm):
     times, rr_values = [], []
+    previous_text = None
     for pc_time, rr_text in zip(hrm["pc_time"], hrm["rr_ms"]):
         if not isinstance(rr_text, str) or rr_text.strip() == "":
             continue
+        if rr_text == previous_text:          # same beats as the last packet: a repeat
+            continue
+        previous_text = rr_text
         beat_time = pc_time
         for rr in reversed([float(v) for v in rr_text.split(";")]):
             times.append(beat_time)            # this interval ended at beat_time
@@ -201,6 +212,9 @@ def process_block(block, drops):
         if len(band_rows) < min_band_rows:
             drops["too few band rows"] += 1
             continue
+        if (band_rows["status"] == 0).mean() > MAX_NO_SKIN_FRACTION:
+            drops["sensor not on skin"] += 1           # PPG is just noise without skin contact
+            continue
 
         # ---- Features from evenly resampled band signals ----
         signals = resample_window(band_rows, fs)
@@ -263,7 +277,7 @@ def main():
         sys.exit(f"No band/hrm file pairs found in {RAW_DIR}/session*/")
 
     print(f"Found {len(blocks)} blocks")
-    drops = {"too few strap readings": 0, "too few band rows": 0}
+    drops = {"too few strap readings": 0, "too few band rows": 0, "sensor not on skin": 0}
     rows = []
     for block in blocks:
         rows += process_block(block, drops)

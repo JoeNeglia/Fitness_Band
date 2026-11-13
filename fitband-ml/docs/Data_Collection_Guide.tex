@@ -1,0 +1,176 @@
+\documentclass[11pt]{article}
+\usepackage[margin=0.9in]{geometry}
+\usepackage{enumitem}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{xcolor}
+\usepackage{amssymb}
+\usepackage{titlesec}
+\usepackage{fancyvrb}
+\usepackage[hidelinks]{hyperref}
+
+\definecolor{accent}{HTML}{1F5FA8}
+\definecolor{warn}{HTML}{B54708}
+\titleformat{\section}{\large\bfseries\color{accent}}{\thesection}{0.6em}{}
+\titleformat{\subsection}{\normalsize\bfseries}{\thesubsection}{0.6em}{}
+\setlist{itemsep=2pt, topsep=4pt}
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{5pt}
+
+% A command typed in Terminal
+\newcommand{\cmd}[1]{\par\smallskip\colorbox{black!6}{\parbox{\dimexpr\linewidth-2\fboxsep}{\ttfamily\small #1}}\par\smallskip}
+% A warning line
+\newcommand{\warn}[1]{\par{\color{warn}\textbf{Watch out:} #1}\par}
+% A checkbox
+\newcommand{\chk}{$\square$\ }
+
+\begin{document}
+
+{\LARGE\bfseries FitBand Data Collection Guide}\\[4pt]
+{\large Step-by-step instructions for recording training data}\\[2pt]
+{\small fitband-ml \textbullet{} CU Boulder ML project}
+
+\medskip
+\textbf{Goal:} at least \textbf{3 sessions on different days}. Each session has 4 activity blocks of 5 minutes
+(resting, typing, walking, running), about 35 minutes including rests. Every block produces two files: one from
+the band and one from the chest strap.
+
+\section{One-time setup (do this once, before the first session)}
+
+\subsection*{1.1 \ Flash the band}
+\begin{enumerate}[label=\arabic*.]
+  \item Open \texttt{firmware/fit\_band\_ble/fit\_band\_ble.ino} in the Arduino IDE.
+  \item Select \textbf{Tools $\to$ Board $\to$ Seeed nRF52 Boards $\to$ Seeed XIAO nRF52840}, pick the port, and click Upload.
+  \item Open the Serial Monitor at \textbf{115200} baud. You should see about 10 lines per second like:
+  \begin{Verbatim}[fontsize=\small, frame=single]
+12340,98211,15.2,12.4,-31.0,998.1,0.42,-1.10,0.35,0,72,2,0
+  \end{Verbatim}
+  \item Press a finger on the PPG sensor. The 2nd number (\texttt{ppg}) should jump up, and after a few
+        seconds the \texttt{bpm} column (3rd from the end) should show a heart rate.
+\end{enumerate}
+\warn{If the first line says \texttt{WARNING: IMU not found} or \texttt{MAX30102 not found}, check the wiring
+(SDA $\to$ D4, SCL $\to$ D5, 3V3, GND) before going further.}
+
+\subsection*{1.2 \ Set up Python}
+In Terminal, from the \texttt{fitband-ml} folder:
+\cmd{python3 -m venv .venv\\source .venv/bin/activate\\pip install -r requirements.txt}
+
+\subsection*{1.3 \ Allow Bluetooth on the Mac}
+Open \textbf{System Settings $\to$ Privacy \& Security $\to$ Bluetooth} and turn on \textbf{Terminal} (and
+\textbf{Visual Studio Code} if you run commands from its terminal). Without this, no devices will be found.
+
+\subsection*{1.4 \ 60-second test run}
+\begin{enumerate}[label=\arabic*.]
+  \item Put on the band and the chest strap (see Section 2, steps 3--4).
+  \item Close the Arduino Serial Monitor, and disconnect the strap from your phone or watch apps.
+  \item Run:
+  \cmd{python collect/collect.py test 60}
+  \item Every 5 seconds it prints row counts. After 60 s you should have about \textbf{600 band rows} and
+        \textbf{120 strap rows} (the strap sends twice per second), and the strap heart rate should look normal.
+  \item Delete the two test files: \texttt{rm data/raw/*test*.csv}
+\end{enumerate}
+If the counts are far off, see Section 5 before recording real sessions.
+
+\section{Before each session (about 5 minutes)}
+\begin{enumerate}[label=\arabic*.]
+  \item \textbf{Pick a place for walking and running.} Bluetooth only reaches about 10 m, and the Mac must stay
+        awake with its lid open. Best options: a treadmill next to the laptop, or short laps that never go more
+        than a few meters from it.
+  \item \textbf{Charge} the band and plug in the laptop. Turn off Mac sleep for now
+        (or run commands with \texttt{caffeinate -i} in front).
+  \item \textbf{Put on the band} on your \textbf{dominant} wrist, about one finger-width above the wrist bone,
+        sensor against the skin. Snug but comfortable. Keep it in the same spot for every session.
+  \item \textbf{Put on the chest strap}: wet the two electrode pads, strap it just below the chest muscles,
+        logo facing up.
+  \item Open Terminal, go to \texttt{fitband-ml}, and activate Python:
+  \cmd{source .venv/bin/activate}
+  \item Check that \texttt{data/raw/} has no loose \texttt{.csv} files left over from a previous session.
+  \item \textbf{Check the band is reading} before every block: in the printout, \texttt{bpm} should show a
+        number, not 0. Windows where the sensor is off the skin are thrown away by \texttt{label.py}.
+  \item \textbf{Sit quietly for 2 minutes} so your heart rate settles before the resting block.
+\end{enumerate}
+
+\section{Recording a session}
+Run each block, then rest about \textbf{2 minutes} (seated) before the next one. Get into position
+first, then run the command. Begin the activity \emph{as soon as} it prints \texttt{Recording}, and keep going
+until it says it saved the files.
+
+\medskip
+\renewcommand{\arraystretch}{1.35}
+\begin{tabular}{@{}c >{\raggedright\arraybackslash}p{1.6in} >{\raggedright\arraybackslash}p{2.35in} >{\raggedright\arraybackslash}p{1.5in}@{}}
+\toprule
+\textbf{Step} & \textbf{Command} & \textbf{What to do} & \textbf{Then} \\
+\midrule
+1 & \texttt{python collect/collect.py resting 300} & Sit, band hand resting still on the table. Don't talk or fidget. & Rest 2 min \\
+2 & \texttt{python collect/collect.py typing 300} & Type continuously on a keyboard (any text). & Rest 2 min \\
+3 & \texttt{python collect/collect.py walking 300} & Walk at a normal pace, arms swinging naturally. & Rest 2 min (seated) \\
+4 & \texttt{python collect/collect.py running 300} & Run or jog at a steady pace you can hold for 5 min. & Done \\
+\bottomrule
+\end{tabular}
+
+\medskip
+\textbf{During every block, glance at the printout every so often:}
+\begin{itemize}
+  \item Band rows should grow by about \textbf{50 every 5 seconds}, strap rows by about \textbf{10}.
+  \item If a device disconnects, the script stops early. Just rerun that same block; the partial files can stay
+        (they have a different timestamp and simply give fewer windows).
+  \item Never use a different activity name than \texttt{resting}, \texttt{typing}, \texttt{walking},
+        \texttt{running}. The name in the file is the label.
+\end{itemize}
+
+\section{After each session}
+\begin{enumerate}[label=\arabic*.]
+  \item Move this session's 8 files into a new numbered folder (use session2, session3, \ldots{} next time):
+  \cmd{mkdir data/raw/session1\\mv data/raw/*.csv data/raw/session1/}
+  \item Check that the folder has \textbf{4 band files and 4 hrm files}, one pair per activity:
+  \cmd{ls data/raw/session1}
+  \item Build the window table and read the summary:
+  \cmd{python analysis/label.py}
+  \item In the summary, each activity of the new session should have about \textbf{50 windows}
+        (300 s / 6 s), and only a few should be dropped.
+  \item Fill in the session log (Section 6) while you still remember what happened.
+  \item Rinse the strap's electrode pads, and charge the band.
+\end{enumerate}
+\warn{The \texttt{data/raw} folder is not saved to GitHub. Back it up yourself (e.g. copy it to a cloud drive)
+after every session.}
+
+\section{Troubleshooting}
+\renewcommand{\arraystretch}{1.3}
+\begin{tabular}{@{}>{\raggedright\arraybackslash}p{2.3in} >{\raggedright\arraybackslash}p{4.1in}@{}}
+\toprule
+\textbf{Problem} & \textbf{Fix} \\
+\midrule
+\texttt{No module named 'bleak'} & The wrong Python is running (often conda's). Run \texttt{conda deactivate}, then \texttt{source .venv/bin/activate}, or use \texttt{.venv/bin/python} instead of \texttt{python}. \\
+``Could not find the band'' & Band powered on? Close the Arduino Serial Monitor and any other app connected to it. Check the Mac's Bluetooth permission (1.3). \\
+Strap won't pair (``Encryption is insufficient'', then ``Not connected'') & The strap is probably still paired to another device. Turn Bluetooth \emph{off} on your phone and any Garmin watch, remove the HRM~200 from their Bluetooth / Garmin Connect sensor lists, take the strap off for a minute, then try again. Note: macOS never lists the strap in System Settings; that's normal. \\
+``Could not find the chest strap'' & Wet the pads and wear it (it only turns on when it touches skin). Disconnect it from phone and watch apps. \\
+Band rows grow much slower than 50 per 5 s & Move the laptop closer. Make sure the Mac isn't going to sleep. \\
+Strap \texttt{hr} shows 0 or jumps around & Re-wet the pads and tighten the strap. \\
+\texttt{bpm} stays 0 / \texttt{status} stays 0 & The PPG isn't touching skin. Tighten the band or move it slightly. \\
+\texttt{label.py}: ``no matching hrm file'' & A band file is missing its partner. Check both files have the same activity and timestamp. \\
+Many windows dropped for ``too few strap readings'' & The strap lost contact during the block. Re-wet the pads next time. \\
+\bottomrule
+\end{tabular}
+
+\section{Session log}
+Fill in one row per session. Notes are things that could affect the data (band position, strap loose,
+treadmill vs.\ outside, coffee, poor sleep, a block you had to redo).
+
+\medskip
+\renewcommand{\arraystretch}{2.1}
+\begin{tabular}{@{}|p{0.75in}|p{0.85in}|p{1.0in}|p{3.35in}|@{}}
+\hline
+\textbf{Session} & \textbf{Date} & \textbf{Wrist / place} & \textbf{Notes} \\ \hline
+session1 & & & \\ \hline
+session2 & & & \\ \hline
+session3 & & & \\ \hline
+session4 & & & \\ \hline
+session5 & & & \\ \hline
+\end{tabular}
+
+\vfill
+\textbf{Checklist per session:} \chk strap and band on \quad \chk 2 min seated \quad \chk resting \quad
+\chk typing \quad \chk walking \quad \chk running \quad \chk files moved to \texttt{sessionN} \quad
+\chk \texttt{label.py} checked \quad \chk data backed up
+
+\end{document}
