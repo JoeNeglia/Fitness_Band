@@ -28,8 +28,12 @@ Wiring: both sensors on SDA → D4, SCL → D5, 3V3, GND.
 firmware/fit_band_ble/   band sketch: streams CSV lines over Bluetooth (Nordic UART)
 collect/collect.py       records the band + chest strap together on one computer
 analysis/label.py        cuts recordings into labelled 6-s windows -> data/processed/windows.csv
-data/raw/sessionN/       your recordings (not committed to git)
-docs/                    project proposal and reference paper
+analysis/                the modelling pipeline (see "Analysis pipeline" below)
+data/raw/sessionN/       the recordings (sessions 1-5, committed)
+results/                 tables, figures and numbers produced by the pipeline
+docs/                    proposal, data collection guide, design_choices.md, reference paper
+DECLARED_CHANGES.md      every deviation from the locked design
+AI_LOG.md                bugs and wrong assumptions hit while building, and how they were caught
 ```
 
 ## One-time setup
@@ -80,6 +84,40 @@ Record **at least 3 sessions on different days**. Then build the window table:
 python analysis/label.py
 ```
 
+## Analysis pipeline
+
+Run these three commands, in this order, from the `fitband-ml` folder:
+
+```bash
+python analysis/label.py      # raw recordings -> data/processed/windows.csv
+python analysis/run_all.py    # all development results (sessions 1-4 only)
+python analysis/final.py      # the one-time test on session 5
+```
+
+- `run_all.py` writes tables to `results/tables/`, figures to `results/figures/`
+  and every number worth quoting to `results/numbers_for_report.md`. It never
+  loads session 5. It takes about 1.5 minutes.
+- **The headline number is the session-5 result from `final.py`**
+  (`results/final/final_summary.md`). It trains on sessions 1-4 and tests on
+  session 5 once, then writes `results/FINAL_RUN_DONE` and refuses to run again
+  unless given `--force` (which is logged in `DECLARED_CHANGES.md`).
+
+| Script | What it does |
+|---|---|
+| `config.py` | seed (42), feature lists, paths, tuning grids, frozen choices |
+| `data.py` | loads windows.csv; removes session 5 unless called from final.py |
+| `models.py` | shared pipelines, leave-one-session-out, tuning loop, k-means pace feature |
+| `stage1_activity.py` | activity classifier: majority, one-feature rule, depth-3 tree, random forest |
+| `stage2_bpm.py` | heart rate: baselines, ridge (PCA) and gradient boosting, 3 ablations |
+| `unsupervised.py` | PCA with vs without, scree plot, loadings; k-means vs activity and pace |
+| `side_experiment.py` | train sessions 1-3, test session 4 (varied pace) |
+| `failure_analysis.py` | slice RMSE with block-bootstrap intervals; within-block proxy check |
+| `final.py` | train 1-4, test 5, once |
+| `run_all.py` | runs everything except final.py, plus sanity and leakage checks |
+
+Sessions 1-3 kept a constant pace. In sessions 4-5, walking and running changed
+pace every 100 s (session 4: low → high; session 5: medium → hard → easy).
+
 ## CSV columns
 
 **`band_<activity>_<YYYYMMDD_HHMMSS>.csv`**, about 10 rows per second:
@@ -108,4 +146,6 @@ python analysis/label.py
 **`data/processed/windows.csv`**, one row per 6-second window: `session`, `activity`, `window`,
 40 features (`<signal>_<mean|std|skew|kurt|energy>` for ppg, ax, ay, az, gx, gy, gz, acc_mag),
 `hr_truth` (mean strap hr), `hr_truth_rr` (from RR intervals), `fft_bpm` (baseline),
-`device_bpm` (band's own estimate).
+`device_bpm` (band's own estimate), `pace_step` (0/1/2, the 100-s pace step;
+walking/running in sessions 4-5 only, otherwise blank) and `transition`
+(True if the window starts within 30 s after a pace change).

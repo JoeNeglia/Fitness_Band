@@ -1,9 +1,3 @@
-# Recorded data stays on your computer (folders are kept via .gitkeep)
-data/raw/*
-data/processed/*
-!data/raw/.gitkeep
-!data/processed/.gitkeep
-
 # Python
 __pycache__/
 *.pyc

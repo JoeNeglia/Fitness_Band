@@ -1,0 +1,10 @@
+|--- ay_mean <= 97.09
+|   |--- ay_mean <= -224.39
+|   |   |--- ax_std <= 389.46
+|   |   |   |--- class: walking
+|   |   |--- ax_std >  389.46
+|   |   |   |--- class: running
+|   |--- ay_mean >  -224.39
+|   |   |--- class: resting
+|--- ay_mean >  97.09
+|   |--- class: typing

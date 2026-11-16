@@ -1,0 +1,5 @@
+activity,cluster 0,cluster 1,cluster 2,cluster 3
+resting,0,0,198,0
+typing,0,199,0,0
+walking,15,0,0,181
+running,197,0,0,0

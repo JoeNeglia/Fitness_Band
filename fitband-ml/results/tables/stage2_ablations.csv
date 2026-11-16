@@ -1,0 +1,5 @@
+variant,ridge,gbm
+primary (no change),8.30,7.93
+a) + fft_bpm as an input,8.61,7.80
+b) predict difference from activity mean,8.22,8.14
+c) + k-means pace level as an input,8.00,7.96

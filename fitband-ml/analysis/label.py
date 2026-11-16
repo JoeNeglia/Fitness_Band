@@ -13,6 +13,9 @@ with its hrm_<activity>_<stamp>.csv, cuts each block into non-overlapping
   hr_truth_rr  heart rate from the strap's beat-to-beat (RR) intervals
   fft_bpm      baseline: dominant frequency of the band-pass filtered PPG
   device_bpm   the band's own on-board heart rate (median in the window)
+  pace_step    0, 1 or 2: which 100-s pace step the window starts in (only for
+               walking/running in the sessions that changed pace; else blank)
+  transition   True if the window starts within 30 s after a pace change
 
 Writes data/processed/windows.csv and prints a summary.
 """
@@ -39,6 +42,12 @@ MAX_NO_SKIN_FRACTION = 0.1      # drop windows where the PPG was off the skin (s
 ENERGY_BAND_HZ = (0.5, 3.0)     # band used for the "energy" feature
 HR_BAND_HZ = (0.67, 3.5)        # heart rate search range: 40-210 BPM
 RR_RANGE_MS = (300, 2000)       # RR intervals outside this are treated as glitches
+
+# Sessions where walking and running changed pace every 100 s (3 steps per 5-min block)
+PACED_SESSIONS = {"session4", "session5"}
+PACED_ACTIVITIES = {"walking", "running"}
+PACE_STEP_S = 100               # length of one pace step
+TRANSITION_S = 30               # heart rate needs time to catch up after a pace change
 
 # Band CSV column for each signal we compute features on (acc_mag is added below)
 SIGNAL_COLUMNS = {
@@ -180,6 +189,22 @@ def signal_features(x, fs):
     return {k: (0.0 if not np.isfinite(v) else float(v)) for k, v in values.items()}
 
 
+def pace_info(session, activity, window_index):
+    """
+    Returns (pace_step, transition) for one window.
+    pace_step is None for blocks that kept a constant pace.
+    transition is True for windows that start less than 30 s after a pace
+    change; the strap heart rate is still rising or falling there.
+    """
+    if session not in PACED_SESSIONS or activity not in PACED_ACTIVITIES:
+        return None, False
+    start_s = window_index * WINDOW_S
+    step = min(int(start_s // PACE_STEP_S), 2)
+    seconds_into_step = start_s - step * PACE_STEP_S
+    transition = step > 0 and seconds_into_step < TRANSITION_S
+    return step, transition
+
+
 # =============================================================================
 #  STEP 5: ONE BLOCK -> WINDOWS
 # =============================================================================
@@ -230,6 +255,9 @@ def process_block(block, drops):
         row["fft_bpm"] = dominant_bpm(bandpass(signals["ppg"], fs, HR_BAND_HZ), fs, HR_BAND_HZ)
         device = band_rows.loc[band_rows["bpm"] > 0, "bpm"]          # 0 means "no reading"
         row["device_bpm"] = device.median() if len(device) else np.nan
+
+        # ---- Pace step (sessions 4-5 only) ----
+        row["pace_step"], row["transition"] = pace_info(block["session"], block["activity"], w)
         rows.append(row)
     return rows
 
@@ -287,7 +315,8 @@ def main():
     df = pd.DataFrame(rows)
     feature_cols = [f"{s}_{f}" for s in SIGNAL_COLUMNS for f in FEATURE_NAMES]
     df = df[["session", "activity", "window"] + feature_cols +
-            ["hr_truth", "hr_truth_rr", "fft_bpm", "device_bpm"]]
+            ["hr_truth", "hr_truth_rr", "fft_bpm", "device_bpm", "pace_step", "transition"]]
+    df["pace_step"] = df["pace_step"].astype("Int64")   # whole numbers; blank when there is no pace step
 
     OUT_CSV.parent.mkdir(parents=True, exist_ok=True)
     df.to_csv(OUT_CSV, index=False, float_format="%.4f")

@@ -1,0 +1,32 @@
+walking, k=2: windows per session (rows) and cluster (columns)
+col_0      0   1
+session         
+session1  49   0
+session2  47   2
+session3  48   1
+session4  22  27
+
+walking, k=3: windows per session (rows) and cluster (columns)
+col_0      0   1   2
+session             
+session1  25   0  24
+session2  44   1   4
+session3  41   0   8
+session4  16  19  14
+
+running, k=2: windows per session (rows) and cluster (columns)
+col_0      0   1
+session         
+session1  18  32
+session2  11  38
+session3  10  39
+session4  36  13
+
+running, k=3: windows per session (rows) and cluster (columns)
+col_0      0   1   2
+session             
+session1   2  18  30
+session2   1  14  34
+session3   7  30  12
+session4  36  13   0
+
