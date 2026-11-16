@@ -87,9 +87,29 @@ little: 7.93 (GBM) vs 8.30 (ridge). But neither clearly beats the activity mean
 
 **What would change my mind.** If a model failed to beat the activity mean on
 session 5 as well, the honest conclusion is that these window features don't carry
-usable heart-rate information during motion. I would then move to a hybrid design
-(FFT when still, a model when moving) or to richer PPG features, such as spectral
-peaks after removing the arm-swing frequency.
+usable heart-rate information during motion. I would then move to richer PPG
+features, such as spectral peaks after removing the arm-swing frequency.
+
+## FFT at rest (the headline design)
+
+**What.** For windows that Stage 1 predicts as resting, the heart rate is the FFT
+estimate. For every other window, it is the model's prediction. The headline is
+GBM with this rule (`gbm_fft_rest`). Ridge with the rule and both plain models are
+reported beside it.
+
+**Why.** When the wrist is still, the PPG pulse is clean and the FFT finds it
+directly: 1.96 BPM error at rest, while the best model managed 4.67. When the
+wrist moves, the FFT locks onto the arm swing (46 BPM error while running), so the
+model takes over. Stage 1 is reliable enough to switch on: all 198 resting windows
+were predicted as resting, and no other window was called resting. The rule has
+nothing to fit, it was the plan in the original proposal, and it helped or tied in
+every held-out session (overall 7.93 → 7.64). It was added after looking at
+development results, which is allowed. It was frozen before session 5 was ever
+used, and it is listed in DECLARED_CHANGES.md.
+
+**What would change my mind.** If Stage 1 started calling moving windows "resting"
+(e.g. a slow walk with a still arm), the FFT would be used where it fails. I would
+then switch on both "predicted resting" and low acc_mag_std, or drop the rule.
 
 ## Tuning grids: tiny, chosen inside the training sessions
 

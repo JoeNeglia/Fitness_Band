@@ -1,7 +1,9 @@
-method,rmse_all,coverage_pct,rmse_resting,rmse_typing,rmse_walking,rmse_running
-Baseline: FFT on every window,28.22,100.00,1.96,19.71,26.79,45.64
-Baseline: activity mean (predicted activity),8.21,100.00,5.37,3.62,8.34,12.61
-"Baseline: activity mean (true activity, ORACLE)",8.19,100.00,5.37,3.62,8.25,12.61
-Baseline: band's device_bpm,75.10,90.25,120.13,58.32,37.93,54.55
-Model: scaler -> PCA -> ridge (readable),8.30,100.00,5.44,5.27,6.11,13.47
-Model: gradient boosting (flexible),7.93,100.00,4.67,4.40,6.19,13.14
+method,column,rmse_all,coverage_pct,rmse_resting,rmse_typing,rmse_walking,rmse_running
+Baseline: FFT on every window,fft,28.22,100.00,1.96,19.71,26.79,45.64
+Baseline: activity mean (predicted activity),activity_mean,8.21,100.00,5.37,3.62,8.34,12.61
+"Baseline: activity mean (true activity, ORACLE)",activity_mean_oracle,8.19,100.00,5.37,3.62,8.25,12.61
+Baseline: band's device_bpm,device,75.10,90.25,120.13,58.32,37.93,54.55
+Model: scaler -> PCA -> ridge (readable),ridge,8.30,100.00,5.44,5.27,6.11,13.47
+Model: gradient boosting (flexible),gbm,7.93,100.00,4.67,4.40,6.19,13.14
+Model + FFT at rest: ridge,ridge_fft_rest,7.90,100.00,1.96,5.27,6.11,13.47
+Model + FFT at rest: gradient boosting (HEADLINE),gbm_fft_rest,7.64,100.00,1.96,4.40,6.19,13.14

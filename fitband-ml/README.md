@@ -5,8 +5,9 @@ machine learning. CU Boulder machine learning class project.
 
 **Approach** (based on Vicente-Samper et al., 2023):
 1. Classify the activity of each 6-second window: resting, typing, walking or running.
-2. Estimate heart rate: FFT of the band-pass filtered PPG for resting windows, a regression
-   model for moving windows.
+2. Estimate heart rate: FFT of the band-pass filtered PPG for windows predicted as resting,
+   a regression model (gradient boosting) for all other windows. This is the headline model,
+   `gbm_fft_rest`.
 
 **Baseline:** the FFT applied to every window. **Metric:** RMSE in BPM against a chest strap.
 **Split:** by session, never by random window.
@@ -108,7 +109,7 @@ python analysis/final.py      # the one-time test on session 5
 | `data.py` | loads windows.csv; removes session 5 unless called from final.py |
 | `models.py` | shared pipelines, leave-one-session-out, tuning loop, k-means pace feature |
 | `stage1_activity.py` | activity classifier: majority, one-feature rule, depth-3 tree, random forest |
-| `stage2_bpm.py` | heart rate: baselines, ridge (PCA) and gradient boosting, 3 ablations |
+| `stage2_bpm.py` | heart rate: baselines, ridge (PCA) and gradient boosting, FFT-at-rest rule, 3 ablations |
 | `unsupervised.py` | PCA with vs without, scree plot, loadings; k-means vs activity and pace |
 | `side_experiment.py` | train sessions 1-3, test session 4 (varied pace) |
 | `failure_analysis.py` | slice RMSE with block-bootstrap intervals; within-block proxy check |

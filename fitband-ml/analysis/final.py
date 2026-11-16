@@ -69,8 +69,7 @@ def main():
     # ---- Slices and proxy check for the headline model ----
     headline = config.HEADLINE_MODEL
     slices = failure_analysis.slice_table(predictions, headline)
-    other = "ridge" if headline == "gbm" else "gbm"
-    proxy = failure_analysis.proxy_table(predictions, [headline, other, "fft", "activity_mean"])
+    proxy = failure_analysis.proxy_table(predictions, failure_analysis.proxy_columns())
 
     # ---- Save ----
     table.to_csv(config.FINAL_DIR / "final_results.csv", index=False, float_format="%.2f")

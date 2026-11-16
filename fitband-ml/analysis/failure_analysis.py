@@ -117,6 +117,12 @@ def within_block_correlation(predictions, column):
     return float(np.corrcoef(predicted, truth)[0, 1])
 
 
+def proxy_columns():
+    """The headline model first, then the plain models and the two baselines."""
+    columns = [config.HEADLINE_MODEL, "gbm", "ridge", "fft", "activity_mean"]
+    return list(dict.fromkeys(columns))       # drop a repeat if the headline is a plain model
+
+
 def proxy_table(predictions, columns):
     return pd.DataFrame([{"method": c, "within_block_correlation": within_block_correlation(predictions, c)}
                          for c in columns])
@@ -135,7 +141,7 @@ def main():
 
     table = slice_table(predictions, headline)
     worst = worst_slice(table)
-    proxy = proxy_table(predictions, [headline, "ridge" if headline == "gbm" else "gbm", "fft", "activity_mean"])
+    proxy = proxy_table(predictions, proxy_columns())
 
     table.to_csv(config.TABLES_DIR / "failure_slices.csv", index=False, float_format="%.2f")
     proxy.to_csv(config.TABLES_DIR / "proxy_check.csv", index=False, float_format="%.3f")

@@ -53,9 +53,18 @@ what was done and why.
 10. **"Did not help" threshold**: an ablation that changes RMSE by less than 0.5 BPM
     is reported as "no meaningful improvement". RMSE varies by several BPM between
     held-out sessions, so smaller changes cannot be told apart from noise.
-11. **Observation line**: the numbers file notes that the FFT beats both models on
-    resting windows. This comes from the existing results table; no extra model was
-    built.
+11. **FFT at rest (headline design).** The locked design says "exactly two models".
+    After the development results showed the FFT beating both models on resting
+    windows (FFT 1.96 BPM vs ridge 5.44 and GBM 4.67), a fixed rule was added:
+    for windows that Stage 1 *predicts* as resting, the prediction is the FFT;
+    otherwise it is the model. It is reported as `ridge_fft_rest` and `gbm_fft_rest`
+    next to the plain models, which are still reported unchanged. Nothing is fitted
+    by the rule, and it uses only the predicted activity, so it works the same way
+    in real use. This is the two-stage design of the original proposal ("FFT for
+    resting windows, a regression model for moving windows"). Decided on 2026-11-15,
+    on sessions 1-4 only, before final.py was ever run. Development effect: overall
+    RMSE 7.93 → 7.64 (GBM), 8.30 → 7.90 (ridge). It improved or tied in every
+    held-out session.
 12. **Data is committed to git** (`data/raw`, `data/processed`; about 6 MB), as
     requested. It was previously ignored.
 13. **Packages added**: scikit-learn and matplotlib (requirements.txt).
@@ -67,8 +76,10 @@ what was done and why.
     separates resting from typing using one wrist-orientation threshold (`ay_mean`),
     which would break if the band were worn slightly rotated. The forest combines
     many features.
-15. **Headline model: gradient boosting**, the lower leave-one-session-out RMSE
-    (7.93 vs 8.30 BPM for ridge).
+15. **Headline model: gradient boosting with the FFT at rest** (`gbm_fft_rest`,
+    7.64 BPM). GBM was picked over ridge for its lower leave-one-session-out RMSE
+    (7.93 vs 8.30 without the rule; 7.64 vs 7.90 with it). The failure analysis and
+    the session-5 slices use this headline.
 
 ## Notes on the slice table
 

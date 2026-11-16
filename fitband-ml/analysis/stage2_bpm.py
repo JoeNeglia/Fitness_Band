@@ -17,6 +17,10 @@ Two models, same splits and metric:
   gbm    GradientBoostingRegressor (flexible)
 Inputs: one-hot predicted activity + 35 IMU features + 5 PPG features.
 
+FFT at rest (the headline design, from the proposal):
+  ridge_fft_rest / gbm_fft_rest  the model's prediction, except for windows
+                 Stage 1 predicts as resting, which get the FFT instead
+
 Ablations (clearly separate from the primary result):
   a) with_fft      fft_bpm added as an input
   b) residual      predict the difference from the predicted activity's mean
@@ -45,6 +49,8 @@ METHODS = [
     ("Baseline: band's device_bpm", "device"),
     ("Model: scaler -> PCA -> ridge (readable)", "ridge"),
     ("Model: gradient boosting (flexible)", "gbm"),
+    ("Model + FFT at rest: ridge", "ridge_fft_rest"),
+    ("Model + FFT at rest: gradient boosting (HEADLINE)", "gbm_fft_rest"),
 ]
 
 # Columns copied from the windows into every predictions table
@@ -105,7 +111,21 @@ def predict_split(train, test, variant="primary", model_names=MODEL_NAMES):
             predicted = predicted + predictions["activity_mean"].to_numpy()
         predictions[name] = predicted
         chosen_settings[name] = settings
+        predictions[f"{name}_fft_rest"] = fft_at_rest(predictions, name)
     return predictions, chosen_settings
+
+
+def fft_at_rest(predictions, model_column):
+    """
+    Use the FFT for windows Stage 1 predicts as resting, the model elsewhere.
+    WHY: when the wrist is still, the PPG pulse is clean and the FFT finds it
+    (about 2 BPM error in development), better than any model. When the wrist
+    moves, the FFT locks onto the arm swing, so the model takes over. It is a
+    fixed rule (nothing is fitted) and uses only the PREDICTED activity, so it
+    works the same way in real use.
+    """
+    at_rest = predictions["predicted_activity"] == config.REST_ACTIVITY
+    return predictions["fft"].where(at_rest, predictions[model_column])
 
 
 def leave_one_session_out(windows, variant="primary", model_names=MODEL_NAMES):
@@ -128,7 +148,7 @@ def results_table(predictions, methods=METHODS):
     """RMSE overall and per activity for every method; coverage for device_bpm."""
     rows = []
     for label, column in methods:
-        row = {"method": label,
+        row = {"method": label, "column": column,
                "rmse_all": models.rmse(predictions[column], predictions[config.TARGET]),
                "coverage_pct": 100 * predictions[column].notna().mean()}
         for activity in config.ACTIVITIES:
@@ -138,7 +158,8 @@ def results_table(predictions, methods=METHODS):
     return pd.DataFrame(rows)
 
 
-def per_session_table(predictions, columns=("fft", "activity_mean", "ridge", "gbm")):
+def per_session_table(predictions, columns=("fft", "activity_mean", "ridge", "gbm",
+                                           "ridge_fft_rest", "gbm_fft_rest")):
     table = predictions.groupby("session").apply(
         lambda part: pd.Series({c: models.rmse(part[c], part[config.TARGET]) for c in columns}))
     return table
@@ -197,9 +218,9 @@ def main():
     numbers += ablation_findings(ablations)
 
     # A fact from the table above, not a new model: the FFT beats both models at rest.
-    resting = table.set_index("method")["rmse_resting"]
-    numbers.append(("Observation: resting RMSE, FFT vs models",
-                    f"FFT {resting.iloc[0]:.2f}, ridge {resting.iloc[4]:.2f}, gbm {resting.iloc[5]:.2f} BPM"))
+    resting = table.set_index("column")["rmse_resting"]
+    numbers.append(("Resting RMSE, FFT vs models (why the FFT is used at rest)",
+                    f"FFT {resting['fft']:.2f}, ridge {resting['ridge']:.2f}, gbm {resting['gbm']:.2f} BPM"))
     return numbers
 
 

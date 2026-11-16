@@ -17,7 +17,7 @@ import models
 import stage2_bpm
 
 
-def rmse_per_pace_step(predictions, columns=("fft", "activity_mean", "ridge", "gbm")):
+def rmse_per_pace_step(predictions, columns=("fft", "activity_mean", "ridge", "gbm", config.HEADLINE_MODEL)):
     """RMSE inside each 100-s pace step of the walking and running blocks."""
     moving = predictions[predictions["activity"].isin(config.MOVING_ACTIVITIES)]
     rows = []

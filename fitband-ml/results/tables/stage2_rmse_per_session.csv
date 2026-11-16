@@ -1,5 +1,5 @@
-session,fft,activity_mean,ridge,gbm
-session1,30.84,8.20,8.45,9.12
-session2,26.68,5.75,5.37,6.00
-session3,25.78,6.29,7.08,5.86
-session4,29.29,11.39,11.19,9.90
+session,fft,activity_mean,ridge,gbm,ridge_fft_rest,gbm_fft_rest
+session1,30.84,8.20,8.45,9.12,7.79,9.12
+session2,26.68,5.75,5.37,6.00,5.22,5.43
+session3,25.78,6.29,7.08,5.86,6.40,5.16
+session4,29.29,11.39,11.19,9.90,10.99,9.71

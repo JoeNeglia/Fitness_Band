@@ -78,7 +78,9 @@ STAGE1_FOREST_TREES = 200
 #  FROZEN CHOICES (decided on sessions 1-4, see results/numbers_for_report.md)
 # =============================================================================
 STAGE1_MODEL = "random_forest"      # activity classifier fed to Stage 2
-HEADLINE_MODEL = "gbm"              # heart-rate model named in the report
+HEADLINE_MODEL = "gbm_fft_rest"     # heart-rate model named in the report: GBM, but the
+                                    # FFT for windows Stage 1 predicts as resting
+REST_ACTIVITY = "resting"           # activity where the FFT replaces the model (see stage2_bpm.py)
 PACE_K = 2                          # k-means clusters per moving activity (variant c)
 
 # =============================================================================
