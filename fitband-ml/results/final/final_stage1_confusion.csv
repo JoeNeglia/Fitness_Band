@@ -1,0 +1,5 @@
+,predicted resting,predicted typing,predicted walking,predicted running
+true resting,49,0,0,0
+true typing,0,50,0,0
+true walking,0,0,50,0
+true running,0,0,0,49

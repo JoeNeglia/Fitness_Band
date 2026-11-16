@@ -1,0 +1,6 @@
+method,within_block_correlation
+gbm_fft_rest,0.433
+gbm,0.431
+ridge,0.089
+fft,-0.172
+activity_mean,0.000

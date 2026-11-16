@@ -32,7 +32,8 @@ analysis/label.py        cuts recordings into labelled 6-s windows -> data/proce
 analysis/                the modelling pipeline (see "Analysis pipeline" below)
 data/raw/sessionN/       the recordings (sessions 1-5, committed)
 results/                 tables, figures and numbers produced by the pipeline
-docs/                    proposal, data collection guide, design_choices.md, reference paper
+docs/                    proposal, final report (Final_Report.tex/.pdf), data collection guide,
+                         design_choices.md, reference paper
 DECLARED_CHANGES.md      every deviation from the locked design
 AI_LOG.md                bugs and wrong assumptions hit while building, and how they were caught
 ```
@@ -114,6 +115,7 @@ python analysis/final.py      # the one-time test on session 5
 | `side_experiment.py` | train sessions 1-3, test session 4 (varied pace) |
 | `failure_analysis.py` | slice RMSE with block-bootstrap intervals; within-block proxy check |
 | `final.py` | train 1-4, test 5, once |
+| `report_figures.py` | figures and error rates for the report, from the saved session-5 predictions (run after final.py) |
 | `run_all.py` | runs everything except final.py, plus sanity and leakage checks |
 
 Sessions 1-3 kept a constant pace. In sessions 4-5, walking and running changed
